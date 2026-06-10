@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-BenderSites Scanner v3.1
+BenderSites Scanner v3.2
 Fokus: VISUELLES ALTER der Website
-Bilder und HTML-Struktur statt externem CSS
 """
 
 import os, csv, re, time, subprocess, threading
@@ -20,9 +19,23 @@ app.config['REPORTS_FOLDER'] = 'reports'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
 
-scan_progress = {'running': False, 'total': 0, 'current': 0, 'url': '', 'results': [], 'report_file': None}
-HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", "Accept-Language": "de-DE,de;q=0.9,en;q=0.8"}
-SKIP_DOMAINS = ['facebook', 'instagram', 'maps.google', 'fleurop', 'gelbeseiten', 'etsy', 'blume2000', 'blumen-risse', 'google']
+scan_progress = {
+    'running': False,
+    'total': 0,
+    'current': 0,
+    'url': '',
+    'results': [],
+    'report_file': None
+}
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "de-DE,de;q=0.9,en;q=0.8"
+}
+
+SKIP_DOMAINS = ['facebook', 'instagram', 'maps.google', 'fleurop',
+                'gelbeseiten', 'etsy', 'blume2000', 'blumen-risse', 'google']
 
 
 def get_domain_age(domain):
@@ -30,200 +43,205 @@ def get_domain_age(domain):
         result = subprocess.run(['whois', domain], capture_output=True, text=True, timeout=5)
         for pat in [r'Creation Date:\s*(\d{4})', r'created:\s*(\d{4})', r'Registered on:\s*(\d{4})']:
             m = re.search(pat, result.stdout, re.I)
-            if m: return int(m.group(1))
-    except: pass
+            if m:
+                return int(m.group(1))
+    except:
+        pass
     return None
 
 
 def analyze_visual_age(soup, html, url):
-    """
-    Analysiert das VISUELLE Alter anhand von HTML-Struktur und Bildern.
-    Externes CSS ist Bonus, nicht Pflicht.
-    """
     score = 50
     details = []
     
-    # ─── 1. RESPONSIVE CHECK (wichtigster Indikator) ──────────────
+    # CSS laden (inline + extern)
+    full_css = ""
+    for s in soup.find_all('style'):
+        full_css += s.get_text() + "\n"
+    
+    base_url = url if url.startswith('http') else 'https://' + url
+    for link in soup.find_all('link', rel='stylesheet'):
+        href = link.get('href', '')
+        if not href:
+            continue
+        css_url = urljoin(base_url, href)
+        try:
+            cr = requests.get(css_url, headers=HEADERS, timeout=8)
+            if cr.status_code == 200:
+                full_css += cr.text[:8000] + "\n"
+        except:
+            pass
+    
+    full_css_lower = full_css.lower()
+    
+    # Viewport
     viewport = soup.find('meta', attrs={'name': 'viewport'})
     if not viewport:
-        score -= 25
-        details.append("❌ KEIN Viewport = fixe Breite = sehr alt")
+        score -= 20
+        details.append("❌ KEIN Viewport = fixe Breite = alt")
     else:
         content = viewport.get('content', '')
         if 'width=device-width' in content:
             score += 10
-            details.append("✅ Responsive Viewport")
+            details.append("✅ Responsive")
         else:
             score += 3
-            details.append("⚠️ Viewport vorhanden aber komisch")
+            details.append("⚠️ Viewport komisch")
     
-    # ─── 2. BILDER ANALYSE (sehr wichtig!) ─────────────────────────
+    # Bilder
     images = soup.find_all('img')
     total_imgs = len(images)
     
     if total_imgs == 0:
         score -= 15
-        details.append("❌ Keine Bilder = Text-Only Seite = alt")
+        details.append("❌ Keine Bilder = Text-Only")
     else:
-        # Große Bilder = modern (Hero, Full-width, Background)
         big_images = 0
-        small_images = 0
         data_uris = 0
         
         for img in images:
             src = img.get('src', '')
-            
-            # Data-URI Bilder = oft alt (Base64 inline)
             if src.startswith('data:image'):
                 data_uris += 1
                 continue
             
-            # Bildgröße prüfen
             w = img.get('width', '')
-            h = img.get('height', '')
             style = img.get('style', '').lower()
             cls = ' '.join(img.get('class', [])).lower()
             
-            # Full-width oder groß
             is_big = (
                 w in ['100%', 'auto', '100vw'] or
                 'width:100%' in style or 'width: 100%' in style or
-                'width:100vw' in style or
-                any(x in cls for x in ['hero', 'banner', 'fullscreen', 'cover', 'bg', 'header-img', 'jumbotron'])
-            )
-            
-            # Sehr klein = Thumbnail/alt
-            is_small = (
-                (w and str(w).isdigit() and int(w) < 200) or
-                (h and str(h).isdigit() and int(h) < 150)
+                any(x in cls for x in ['hero', 'banner', 'fullscreen', 'cover', 'bg'])
             )
             
             if is_big:
                 big_images += 1
-            elif is_small:
-                small_images += 1
         
         if data_uris > 2:
-            score -= 10
-            details.append(f"❌ {data_uris} Base64-Bilder = alt/langsam")
+            score -= 8
+            details.append(f"❌ {data_uris} Base64-Bilder")
         
         if big_images >= 2:
             score += 15
-            details.append(f"✅ {big_images} große Bilder (Hero/Full-width) = modern")
+            details.append(f"✅ {big_images} große Bilder = modern")
         elif big_images == 1:
             score += 5
-            details.append(f"⚠️ Nur 1 großes Bild")
+            details.append(f"⚠️ 1 großes Bild")
         else:
             score -= 10
-            details.append(f"❌ Nur kleine Bilder/Thumbnails ({small_images}/{total_imgs}) = alt")
+            details.append(f"❌ Nur kleine Bilder = alt")
         
-        # SVG = modern
         svgs = len(soup.find_all('svg'))
         if svgs > 0:
             score += 8
-            details.append(f"✅ SVG Grafiken ({svgs}) = modern")
+            details.append(f"✅ SVG ({svgs})")
         
-        # Lazy loading = modern
         lazy = sum(1 for img in images if img.get('loading') == 'lazy')
         if lazy > 0:
             score += 5
-            details.append(f"✅ Lazy Loading")
+            details.append("✅ Lazy Loading")
         
-        # Picture-Tag = modern (responsive Bilder)
         pictures = len(soup.find_all('picture'))
         if pictures > 0:
             score += 5
-            details.append(f"✅ Picture-Tag ({pictures}) = responsive Bilder")
+            details.append(f"✅ Picture-Tag ({pictures})")
     
-    # ─── 3. HTML STRUKTUR ─────────────────────────────────────────
-    # Semantische Tags
+    # HTML Struktur
     semantic = ['header', 'nav', 'main', 'section', 'article', 'footer', 'aside']
     sem_count = sum(1 for tag in semantic if soup.find(tag))
     if sem_count >= 4:
         score += 10
-        details.append(f"✅ Semantisches HTML ({sem_count} Tags)")
+        details.append(f"✅ Semantisch ({sem_count})")
     elif sem_count >= 2:
         score += 3
-        details.append(f"⚠️ Wenig semantisches HTML ({sem_count})")
+        details.append(f"⚠️ Semantisch ({sem_count})")
     else:
         score -= 10
-        details.append("❌ Nur divs = alt")
+        details.append("❌ Kein semantisches HTML")
     
-    # Div-Suppe
     divs = len(soup.find_all('div'))
     if divs > 100:
         score -= 5
-        details.append(f"⚠️ Div-Suppe ({divs} divs)")
+        details.append(f"⚠️ Div-Suppe ({divs})")
     
-    # Tabellen für Layout = sehr alt
     tables = len(soup.find_all('table'))
     if tables > 2:
         score -= 20
-        details.append(f"❌ Table-Layout ({tables}) = Steinzeit")
+        details.append(f"❌ Tables ({tables})")
     elif tables > 0:
         score -= 5
-        details.append(f"⚠️ Tabellen ({tables})")
+        details.append(f"⚠️ Tables ({tables})")
     
-    # ─── 4. CSS AUS HTML ──────────────────────────────────────────
-    full_css = ' '.join([s.get_text() for s in soup.find_all('style')])
-    full_css_lower = full_css.lower()
-    
-    # Flexbox/Grid
+    # CSS Layout
     has_flex = 'display:flex' in full_css_lower or 'display: flex' in full_css_lower
     has_grid = 'display:grid' in full_css_lower or 'display: grid' in full_css_lower
-    if has_flex: score += 5; details.append("✅ Flexbox")
-    if has_grid: score += 8; details.append("✅ CSS Grid")
     
-    # Float = alt
-    floats = full_css_lower.count('float:')
-    if floats > 5:
-        score -= 10
-        details.append(f"❌ Float-Layout ({floats}x)")
+    if has_flex:
+        score += 8
+        details.append("✅ Flexbox")
+    if has_grid:
+        score += 12
+        details.append("✅ CSS Grid")
     
-    # Fixe Breiten
+    if not has_flex and not has_grid:
+        floats = full_css_lower.count('float:')
+        abs_pos = full_css_lower.count('position:absolute') + full_css_lower.count('position: absolute')
+        if floats > 3:
+            score -= 15
+            details.append(f"❌ Float-Layout ({floats}x)")
+        elif abs_pos > 5:
+            score -= 10
+            details.append(f"❌ Viel absolute Positionierung")
+        else:
+            score -= 5
+            details.append("⚠️ Kein modernes Layout")
+    
     fixed_px = len(re.findall(r'width:\s*\d{3,4}px', full_css_lower))
     if fixed_px > 5:
         score -= 15
-        details.append(f"❌ Fixe Pixel-Breiten ({fixed_px}x) = nicht responsive")
-    elif fixed_px > 0:
-        score -= 5
-        details.append(f"⚠️ Einige fixe Breiten ({fixed_px})")
+        details.append(f"❌ Fixe Breiten ({fixed_px})")
     
-    # Max-width/container = modern
     if 'max-width' in full_css_lower:
         score += 3
-        details.append("✅ Max-width verwendet")
+        details.append("✅ Max-width")
     
-    # ─── 5. SCHRIFTEN ─────────────────────────────────────────────
+    # Schriften
     has_webfonts = 'fonts.googleapis' in html or '@font-face' in full_css_lower
     if has_webfonts:
         score += 5
         details.append("✅ Webfonts")
+    elif 'font-family:arial' in full_css_lower or 'font-family: times' in full_css_lower:
+        score -= 5
+        details.append("⚠️ System-Fonts")
     
-    # ─── 6. FARBE & DESIGN ─────────────────────────────────────────
+    # Design
     gradients = len(re.findall(r'linear-gradient|radial-gradient', full_css_lower))
-    if gradients > 3:
-        score -= 8
-        details.append(f"❌ Viele Gradienten ({gradients}) = Web 2.0")
+    if gradients > 5:
+        score -= 10
+        details.append(f"❌ Gradienten ({gradients})")
+    elif gradients > 2:
+        score -= 3
+        details.append(f"⚠️ Gradienten ({gradients})")
     
     shadows = full_css_lower.count('box-shadow')
-    if shadows > 8:
+    if shadows > 10:
         score -= 5
-        details.append(f"⚠️ Viele Schatten ({shadows})")
+        details.append(f"⚠️ Schatten ({shadows})")
     
     radius = full_css_lower.count('border-radius')
-    if radius > 10:
+    if radius > 15:
         score += 3
-        details.append("✅ Viele abgerundete Ecken")
+        details.append("✅ Abgerundet")
     elif radius == 0:
         score -= 5
-        details.append("❌ Keine border-radius = kantig/alt")
+        details.append("❌ Kantig")
     
-    # ─── 7. FRAMEWORKS ────────────────────────────────────────────
+    # Frameworks
     if 'bootstrap/3' in html or 'bootstrap-3' in html:
         score -= 10
         details.append("❌ Bootstrap 3")
-    elif 'bootstrap/4' in html or 'bootstrap-5' in html:
+    elif 'bootstrap/4' in html or 'bootstrap-5' in html or 'bootstrap@4' in html or 'bootstrap@5' in html:
         score += 2
         details.append("✅ Bootstrap 4/5")
     
@@ -231,24 +249,23 @@ def analyze_visual_age(soup, html, url):
         score -= 8
         details.append("❌ jQuery 1.x")
     
-    # ─── 8. ANIMATIONEN ───────────────────────────────────────────
+    # Animationen
     has_anim = 'transition' in full_css_lower or 'animation' in full_css_lower or '@keyframes' in full_css_lower
     if has_anim:
         score += 3
-        details.append("✅ CSS Animationen")
+        details.append("✅ Animationen")
     
-    # ─── 9. MARQUEE/BLINK = TODESSTRAFE ───────────────────────────
+    # Marquee/Blink
     if '<marquee' in html.lower():
         score -= 40
-        details.append("❌❌ MARQUEE = 90er!")
+        details.append("❌❌ MARQUEE!")
     if '<blink' in html.lower():
         score -= 40
-        details.append("❌❌ BLINK = 90er!")
+        details.append("❌❌ BLINK!")
     
-    # ─── SCORE BEGRENZEN ──────────────────────────────────────────
+    # Score begrenzen
     score = max(0, min(100, score))
     
-    # Ära bestimmen
     if score < 20:
         era = "🔴 SEHR ALT (2000-2010)"
     elif score < 40:
@@ -263,12 +280,20 @@ def analyze_visual_age(soup, html, url):
 
 def analyze_website(url):
     result = {
-        'url': url, 'reachable': False, 'domain_age': None,
-        'visual_score': 0, 'visual_era': '', 'visual_details': [],
-        'problems': [], 'opportunities': [],
-        'mail': None, 'telefon': None,
-        'has_ssl': False, 'load_time': 0,
-        'category': 'unbekannt', 'total_score': 0
+        'url': url,
+        'reachable': False,
+        'domain_age': None,
+        'visual_score': 0,
+        'visual_era': '',
+        'visual_details': [],
+        'problems': [],
+        'opportunities': [],
+        'mail': None,
+        'telefon': None,
+        'has_ssl': False,
+        'load_time': 0,
+        'category': 'unbekannt',
+        'total_score': 0
     }
     
     if not url.startswith('http'):
@@ -292,25 +317,27 @@ def analyze_website(url):
         result['problems'].append(f"Nicht erreichbar: {str(e)[:50]}")
         return result
     
-    # ─── VISUELLE ANALYSE ─────────────────────────────────────────
+    # Visuelle Analyse
     visual_score, visual_details, era = analyze_visual_age(soup, html, url)
     result['visual_score'] = visual_score
     result['visual_era'] = era
     result['visual_details'] = visual_details
     
-    # ─── VERKAUFSARGUMENTE ────────────────────────────────────────
-    has_imp = any(p in html for p in ['/impressum','impressum','imprint']) or soup.find('a', href=re.compile(r'impressum|imprint', re.I))
-    if not has_imp: result['opportunities'].append("Kein Impressum sichtbar")
+    # Verkaufsargumente
+    has_imp = any(p in html for p in ['/impressum', 'impressum', 'imprint']) or soup.find('a', href=re.compile(r'impressum|imprint', re.I))
+    if not has_imp:
+        result['opportunities'].append("Kein Impressum sichtbar")
     
-    cta_w = ['termin','anrufen','jetzt buchen','reservieren','kontakt']
-    btns = soup.find_all(['a','button'])
+    cta_w = ['termin', 'anrufen', 'jetzt buchen', 'reservieren', 'kontakt']
+    btns = soup.find_all(['a', 'button'])
     has_cta = any(any(w in b.get_text(strip=True).lower() for w in cta_w) for b in btns if b.get_text(strip=True))
-    if not has_cta: result['opportunities'].append("Kein Call-to-Action")
+    if not has_cta:
+        result['opportunities'].append("Kein Call-to-Action")
     
-    if not any(w in html.lower() for w in ['bewertung','review','sterne','google maps']):
+    if not any(w in html.lower() for w in ['bewertung', 'review', 'sterne', 'google maps']):
         result['opportunities'].append("Keine Bewertungen sichtbar")
     
-    if not any(w in html.lower() for w in ['öffnungszeit','mo-fr','montag']):
+    if not any(w in html.lower() for w in ['öffnungszeit', 'mo-fr', 'montag']):
         result['opportunities'].append("Keine Öffnungszeiten")
     
     if result['load_time'] > 4:
@@ -319,22 +346,24 @@ def analyze_website(url):
     if not soup.find('meta', attrs={'name': 'viewport'}):
         result['opportunities'].append("NICHT mobil optimiert")
     
-    # ─── MAIL & TELEFON ───────────────────────────────────────────
+    # Mail & Telefon
     mt = soup.find('a', href=re.compile(r'mailto:', re.I))
-    if mt: result['mail'] = mt['href'].replace('mailto:', '').strip().split('?')[0].lower()
+    if mt:
+        result['mail'] = mt['href'].replace('mailto:', '').strip().split('?')[0].lower()
     if not result['mail']:
         m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', html)
         if m:
             c = m.group().lower()
-            if not any(j in c for j in ['.png','.jpg','.css','.js','example','domain','wixpress']):
+            if not any(j in c for j in ['.png', '.jpg', '.css', '.js', 'example', 'domain', 'wixpress']):
                 result['mail'] = c
     
     phones = []
     for p in [r'\+49[\s\d\-/]{6,20}', r'0\d{2,4}[\s\-/]\d{3,10}', r'tel:\+?[\d\s\-]+']:
         phones.extend(re.findall(p, html))
-    if phones: result['telefon'] = phones[0][:30]
+    if phones:
+        result['telefon'] = phones[0][:30]
     
-    # ─── KATEGORIE ────────────────────────────────────────────────
+    # Kategorie
     result['total_score'] = visual_score
     
     if visual_score < 20:
@@ -350,7 +379,13 @@ def analyze_website(url):
 
 
 def generate_html_report(results, filepath):
-    order = {'🔴 SEHR ALT (2000-2010)': 0, '🟠 ALT (2010-2015)': 1, '🟡 MITTEL (2015-2019)': 2, '🟢 MODERN (2020+)': 3, '❌ Fehler': 99}
+    order = {
+        '🔴 SEHR ALT (2000-2010)': 0,
+        '🟠 ALT (2010-2015)': 1,
+        '🟡 MITTEL (2015-2019)': 2,
+        '🟢 MODERN (2020+)': 3,
+        '❌ Fehler': 99
+    }
     results.sort(key=lambda x: (order.get(x['category'], 5), -x['total_score']))
     
     html = f"""<!DOCTYPE html>
@@ -358,7 +393,7 @@ def generate_html_report(results, filepath):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BenderSites Scanner - Visuelles Alter</title>
+<title>BenderSites Scanner</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem}}
@@ -448,24 +483,49 @@ function exportCSV(){const rows=[];rows.push('URL;Kategorie;VisuellerScore;Visue
 
 def run_scan(filepath):
     global scan_progress
-    scan_progress = {'running': True, 'total': 0, 'current': 0, 'url': '', 'results': [], 'report_file': None}
+    scan_progress = {
+        'running': True,
+        'total': 0,
+        'current': 0,
+        'url': '',
+        'results': [],
+        'report_file': None
+    }
+    
     urls = []
     with open(filepath, 'r', encoding='utf-8') as f:
-        sample = f.read(2048); f.seek(0)
+        sample = f.read(2048)
+        f.seek(0)
         delimiter = ';' if sample.count(';') > sample.count(',') else ','
         f.seek(0)
         for row in csv.DictReader(f, delimiter=delimiter):
             site = row.get('Website', row.get('website', row.get('URL', row.get('url', '')))).strip()
             if site and site.startswith('http') and not any(d in site for d in SKIP_DOMAINS):
                 urls.append(site)
+    
     scan_progress['total'] = len(urls)
+    
     for i, url in enumerate(urls):
-        scan_progress['current'] = i + 1; scan_progress['url'] = url[:60]
+        scan_progress['current'] = i + 1
+        scan_progress['url'] = url[:60]
         try:
             scan_progress['results'].append(analyze_website(url))
         except Exception as e:
-            scan_progress['results'].append({'url': url, 'category': '❌ Fehler', 'total_score': 0, 'visual_score': 0, 'visual_era': 'Fehler', 'visual_details': [], 'opportunities': [str(e)], 'mail': None, 'telefon': None, 'domain_age': None, 'load_time': 0})
+            scan_progress['results'].append({
+                'url': url,
+                'category': '❌ Fehler',
+                'total_score': 0,
+                'visual_score': 0,
+                'visual_era': 'Fehler',
+                'visual_details': [],
+                'opportunities': [str(e)],
+                'mail': None,
+                'telefon': None,
+                'domain_age': None,
+                'load_time': 0
+            })
         time.sleep(0.3)
+    
     rp = os.path.join(app.config['REPORTS_FOLDER'], f'report_{int(time.time())}.html')
     generate_html_report(scan_progress['results'], rp)
     scan_progress['report_file'] = rp
@@ -476,17 +536,22 @@ def run_scan(filepath):
 def index():
     return render_template('upload.html')
 
+
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'file' not in request.files:
         return jsonify({'error': 'Keine Datei'}), 400
+    
     file = request.files['file']
     if file.filename == '' or not file.filename.endswith('.csv'):
         return jsonify({'error': 'Nur CSV-Dateien'}), 400
+    
     fp = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(fp)
+    
     threading.Thread(target=run_scan, args=(fp,), daemon=True).start()
     return jsonify({'status': 'started'})
+
 
 @app.route('/status')
 def status():
@@ -498,23 +563,37 @@ def status():
         'percent': round(scan_progress['current'] / scan_progress['total'] * 100, 1) if scan_progress['total'] > 0 else 0
     })
 
+
 @app.route('/report')
 def report():
     if scan_progress['report_file'] and os.path.exists(scan_progress['report_file']):
         return send_file(scan_progress['report_file'])
     return jsonify({'error': 'Noch kein Report'}), 404
 
+
 @app.route('/download-csv')
 def download_csv():
     if not scan_progress['results']:
         return jsonify({'error': 'Keine Daten'}), 404
+    
     cp = os.path.join(app.config['REPORTS_FOLDER'], 'export.csv')
     with open(cp, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f, delimiter=';')
-        w.writerow(['URL','Kategorie','VisuellerScore','VisuelleAera','Mail','Telefon','Domainalter','Ladezeit','Verkaufsargumente'])
+        w.writerow(['URL', 'Kategorie', 'VisuellerScore', 'VisuelleAera', 'Mail', 'Telefon', 'Domainalter', 'Ladezeit', 'Verkaufsargumente'])
         for r in scan_progress['results']:
-            w.writerow([r['url'], r['category'], r['visual_score'], r['visual_era'], r['mail'] or '', r['telefon'] or '', r['domain_age'] or '', r['load_time'], ' | '.join(r['opportunities'])])
+            w.writerow([
+                r['url'],
+                r['category'],
+                r['visual_score'],
+                r['visual_era'],
+                r['mail'] or '',
+                r['telefon'] or '',
+                r['domain_age'] or '',
+                r['load_time'],
+                ' | '.join(r['opportunities'])
+            ])
     return send_file(cp, as_attachment=True, download_name='bender-sites-scan.csv')
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
