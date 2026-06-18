@@ -73,6 +73,28 @@ def analyze_visual_age(soup, html, url):
             pass
     
     full_css_lower = full_css.lower()
+    html_lower = html.lower()
+    
+    # ===== BAUKASTEN-ERKENNUNG =====
+    # Baukästen liefern moderne Technik (Flexbox/Grid/Webfonts) automatisch mit,
+    # auch wenn die Seite optisch alt aussieht. Spuren im HTML/CSS:
+    baukasten_signatures = {
+        'Jimdo': ['jimdo', 'jimdofree', 'jdo.io', 'jimdostatic', 'cmsbox'],
+        'Wix': ['wix.com', 'wixstatic', 'wixsite', '_wix', 'parastorage'],
+        'Squarespace': ['squarespace', 'sqsp.net', 'sqspcdn'],
+        'Webnode': ['webnode', 'wnode'],
+        'WordPress': ['wp-content', 'wp-includes', 'wp-json'],
+        'Webflow': ['webflow.io', 'webflow.com', 'wf-'],
+        'GoDaddy': ['godaddy', 'websitebuilder'],
+        'IONOS/1&1': ['1and1', 'ionos', 'mywebsite'],
+        'Joomla': ['joomla', '/components/com_'],
+        'Typo3': ['typo3'],
+    }
+    detected_baukasten = None
+    for name, sigs in baukasten_signatures.items():
+        if any(s in html_lower for s in sigs):
+            detected_baukasten = name
+            break
     
     # Viewport
     viewport = soup.find('meta', attrs={'name': 'viewport'})
@@ -262,6 +284,48 @@ def analyze_visual_age(soup, html, url):
     if '<blink' in html.lower():
         score -= 40
         details.append("❌❌ BLINK!")
+    
+    # ===== BAUKASTEN-KORREKTUR =====
+    # Wenn ein Baukasten erkannt wurde, ist der Technik-Bonus irreführend.
+    # Die Seite kann optisch alt sein, obwohl die Infrastruktur modern ist.
+    # Wir deckeln den Score, sodass nur wirklich gut gemachte Seiten durchkommen.
+    if detected_baukasten:
+        details.append(f"⚠️ Baukasten: {detected_baukasten}")
+        # Technik-Bonus neutralisieren: Score Richtung "echtes Design" ziehen.
+        # Deckel bei 64 = max MITTEL, nie automatisch MODERN nur wegen Baukasten-Technik.
+        if score > 64:
+            score = 64
+            details.append("ℹ️ Score gedeckelt – Baukasten-Technik ≠ modernes Design")
+        # Zusätzlicher Abzug, da Baukasten-Seiten selten individuell wirken
+        score -= 8
+    
+    # ===== ECHTE NEGATIV-SIGNALE (optisch alt) =====
+    # Hintergrundfarbe direkt am body via bgcolor-Attribut = uraltes HTML
+    body_tag = soup.find('body')
+    if body_tag and body_tag.get('bgcolor'):
+        score -= 12
+        details.append("❌ bgcolor-Attribut = HTML aus den 2000ern")
+    
+    # font-Tags (vor HTML5, klares Alt-Signal)
+    if soup.find('font'):
+        score -= 15
+        details.append("❌ <font>-Tags = sehr alt")
+    
+    # center-Tags (deprecated)
+    if soup.find('center'):
+        score -= 8
+        details.append("❌ <center>-Tags = veraltet")
+    
+    # Inline-Style-Wüste (viele style="" Attribute = oft alt/Baukasten-Export)
+    inline_styles = len([t for t in soup.find_all(True) if t.get('style')])
+    if inline_styles > 40:
+        score -= 8
+        details.append(f"⚠️ Sehr viele Inline-Styles ({inline_styles})")
+    
+    # Frames/Framesets (steinalt)
+    if soup.find('frameset') or soup.find('frame') or soup.find('iframe', src=re.compile(r'\.html')):
+        score -= 15
+        details.append("❌ Frames = 90er/2000er")
     
     # Score begrenzen
     score = max(0, min(100, score))
