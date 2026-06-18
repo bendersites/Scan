@@ -532,16 +532,6 @@ def run_scan(filepath):
     scan_progress['running'] = False
 
 
-@app.route('/scan-single', methods=['POST'])
-def scan_single():
-    data = request.get_json()
-    url = data.get('url', '').strip()
-    if not url:
-        return jsonify({'error': 'Keine URL'}), 400
-    result = analyze_website(url)
-    return jsonify(result)
-
-
 @app.route('/')
 def index():
     return render_template('upload.html')

@@ -41,15 +41,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     </div>
     <input type="file" class="file-input" id="fileInput" accept=".csv">
     <button class="btn" id="scanBtn" disabled>🚀 Scan starten</button>
-
-    <div style="margin-top:2rem;padding-top:2rem;border-top:1px solid #334155;">
-        <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:0.75rem;">Einzelne Website checken</p>
-        <div style="display:flex;gap:0.75rem;">
-            <input type="text" id="singleUrl" placeholder="https://beispiel.de" style="flex:1;padding:0.75rem 1rem;background:#0f172a;border:1px solid #475569;border-radius:10px;color:#e2e8f0;font-size:0.95rem;outline:none;" />
-            <button id="singleBtn" onclick="checkSingle()" style="padding:0.75rem 1.25rem;background:linear-gradient(135deg,#f59e0b,#d97706);color:#0f172a;border:none;border-radius:10px;font-weight:700;cursor:pointer;white-space:nowrap;">Checken</button>
-        </div>
-        <div id="singleResult" style="display:none;margin-top:1rem;padding:1.25rem;background:#0f172a;border-radius:12px;border:1px solid #334155;font-size:0.875rem;"></div>
-    </div>
     <div class="progress" id="progress">
         <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
         <div class="progress-info"><span class="current" id="currentUrl">Warte auf Start...</span><span id="progressText">0 / 0</span></div>
@@ -70,36 +61,6 @@ dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.clas
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); if(e.dataTransfer.files.length){selectedFile=e.dataTransfer.files[0]; dropZone.innerHTML=`<p style="color:#f59e0b;font-weight:600;">📄 ${selectedFile.name}</p>`; scanBtn.disabled=false;} });
 fileInput.addEventListener('change', () => { if(fileInput.files.length){selectedFile=fileInput.files[0]; dropZone.innerHTML=`<p style="color:#f59e0b;font-weight:600;">📄 ${selectedFile.name}</p>`; scanBtn.disabled=false;} });
-async function checkSingle() {
-    const url = document.getElementById('singleUrl').value.trim();
-    if (!url) return;
-    const btn = document.getElementById('singleBtn');
-    const box = document.getElementById('singleResult');
-    btn.disabled = true;
-    btn.textContent = '...';
-    box.style.display = 'block';
-    box.innerHTML = '<span style="color:#94a3b8">Scanne...</span>';
-    try {
-        const r = await fetch('/scan-single', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url})});
-        const d = await r.json();
-        const scoreColor = d.visual_score < 20 ? '#fca5a5' : d.visual_score < 40 ? '#fdba74' : d.visual_score < 65 ? '#fde047' : '#6ee7b7';
-        const details = d.visual_details.map(x => `<div style="padding:2px 0">${x}</div>`).join('');
-        const opps = d.opportunities.length ? `<div style="margin-top:0.75rem;padding:0.75rem;background:#1e3a5f;border-radius:8px;border-left:3px solid #3b82f6"><div style="color:#93c5fd;font-size:0.8rem;margin-bottom:0.4rem">Verkaufsargumente</div>${d.opportunities.map(o=>`<div style="color:#bfdbfe;font-size:0.8rem">💡 ${o}</div>`).join('')}</div>` : '';
-        box.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
-                <a href="${d.url}" target="_blank" style="color:#60a5fa;font-size:0.8rem">${d.url}</a>
-                <span style="font-size:1.5rem;font-weight:700;color:${scoreColor}">${d.visual_score}</span>
-            </div>
-            <div style="color:${scoreColor};font-weight:600;margin-bottom:0.75rem">${d.visual_era}</div>
-            <div style="color:#94a3b8;font-size:0.8rem;margin-bottom:0.5rem">📧 ${d.mail||'–'} &nbsp; 📞 ${d.telefon||'–'} &nbsp; ⏱️ ${d.load_time}s &nbsp; 📅 ${d.domain_age||'?'}</div>
-            ${details}${opps}`;
-    } catch(e) {
-        box.innerHTML = '<span style="color:#fca5a5">Fehler beim Scannen</span>';
-    }
-    btn.disabled = false;
-    btn.textContent = 'Checken';
-}
-
 scanBtn.addEventListener('click', async () => { if(!selectedFile)return; scanBtn.disabled=true; progress.style.display='block'; const fd=new FormData(); fd.append('file',selectedFile); await fetch('/upload',{method:'POST',body:fd}); const iv=setInterval(async()=>{const d=await(await fetch('/status')).json(); progressFill.style.width=d.percent+'%'; currentUrl.textContent=d.url||'Scanne...'; progressText.textContent=`${d.current} / ${d.total}`; if(!d.running&&d.current>0){clearInterval(iv); progress.style.display='none'; result.style.display='block'; summaryText.textContent=`${d.total} Websites analysiert. Filter im Report auf 🔴 ALT für deine heißen Leads.`; scanBtn.textContent='✅ Fertig';}},1000); });
 </script>
 </body>
