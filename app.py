@@ -247,6 +247,25 @@ def analyze_visual_age(soup, html, url):
         score -= 5
         details.append("❌ Kantig")
     
+    # Baukasten-Erkennung – visuell oft mittel, aber technisch modern gebaut
+    baukästen = {
+        'jimdo': 'jimdo.com',
+        'wix': 'wix.com',
+        'squarespace': 'squarespace.com',
+        'webnode': 'webnode.com',
+        'webflow': 'webflow.io',
+        'wordpress.com': 'wordpress.com',
+    }
+    detected_baukasten = None
+    for name, domain in baukästen.items():
+        if domain in html.lower() or name in html.lower():
+            detected_baukasten = name
+            break
+
+    if detected_baukasten:
+        score -= 15
+        details.append(f"⚠️ Baukasten erkannt ({detected_baukasten}) – Score korrigiert")
+
     # Frameworks
     if 'bootstrap/3' in html or 'bootstrap-3' in html:
         score -= 10
