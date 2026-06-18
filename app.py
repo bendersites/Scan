@@ -118,6 +118,11 @@ def analyze_visual_age(soup, html, url):
             if is_big:
                 big_images += 1
         
+        # CSS Background-Images als große Bilder zählen
+        bg_image_count = len(re.findall(r'background(?:-image)?\s*:[^;]*url\s*\(', full_css_lower))
+        bg_inline = len([t for t in soup.find_all(True) if 'background-image' in t.get('style', '').lower()])
+        big_images += min(bg_image_count + bg_inline, 3)
+        
         if data_uris > 2:
             score -= 8
             details.append(f"❌ {data_uris} Base64-Bilder")
@@ -150,7 +155,7 @@ def analyze_visual_age(soup, html, url):
     # HTML Struktur
     semantic = ['header', 'nav', 'main', 'section', 'article', 'footer', 'aside']
     sem_count = sum(1 for tag in semantic if soup.find(tag))
-    if sem_count >= 4:
+    if sem_count >= 3:
         score += 10
         details.append(f"✅ Semantisch ({sem_count})")
     elif sem_count >= 2:
@@ -161,9 +166,12 @@ def analyze_visual_age(soup, html, url):
         details.append("❌ Kein semantisches HTML")
     
     divs = len(soup.find_all('div'))
-    if divs > 100:
+    uses_framework = any(x in html for x in ['tailwind', 'cdn.tailwindcss', 'bootstrap', 'bulma', 'foundation'])
+    if divs > 100 and not uses_framework:
         score -= 5
         details.append(f"⚠️ Div-Suppe ({divs})")
+    elif divs > 100 and uses_framework:
+        details.append(f"ℹ️ Div-Suppe ({divs}) – Framework-generiert")
     
     tables = len(soup.find_all('table'))
     if tables > 2:
@@ -198,9 +206,12 @@ def analyze_visual_age(soup, html, url):
             details.append("⚠️ Kein modernes Layout")
     
     fixed_px = len(re.findall(r'width:\s*\d{3,4}px', full_css_lower))
-    if fixed_px > 5:
+    uses_framework = any(x in html for x in ['tailwind', 'cdn.tailwindcss', 'bootstrap', 'bulma', 'foundation'])
+    if fixed_px > 5 and not uses_framework:
         score -= 15
         details.append(f"❌ Fixe Breiten ({fixed_px})")
+    elif fixed_px > 5 and uses_framework:
+        details.append(f"ℹ️ Fixe Breiten ({fixed_px}) – Framework-generiert")
     
     if 'max-width' in full_css_lower:
         score += 3
@@ -217,12 +228,11 @@ def analyze_visual_age(soup, html, url):
     
     # Design
     gradients = len(re.findall(r'linear-gradient|radial-gradient', full_css_lower))
-    if gradients > 5:
-        score -= 10
-        details.append(f"❌ Gradienten ({gradients})")
-    elif gradients > 2:
-        score -= 3
-        details.append(f"⚠️ Gradienten ({gradients})")
+    if gradients > 15:
+        score -= 5
+        details.append(f"⚠️ Viele Gradienten ({gradients})")
+    elif gradients > 0:
+        details.append(f"ℹ️ Gradienten ({gradients})")
     
     shadows = full_css_lower.count('box-shadow')
     if shadows > 10:
@@ -530,6 +540,16 @@ def run_scan(filepath):
     generate_html_report(scan_progress['results'], rp)
     scan_progress['report_file'] = rp
     scan_progress['running'] = False
+
+
+@app.route('/scan-single', methods=['POST'])
+def scan_single():
+    data = request.get_json()
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'Keine URL'}), 400
+    result = analyze_website(url)
+    return jsonify(result)
 
 
 @app.route('/')
