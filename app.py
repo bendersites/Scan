@@ -118,6 +118,11 @@ def analyze_visual_age(soup, html, url):
             if is_big:
                 big_images += 1
         
+        # CSS Background-Images als große Bilder zählen
+        bg_image_count = len(re.findall(r'background(?:-image)?\s*:[^;]*url\s*\(', full_css_lower))
+        bg_inline = len([t for t in soup.find_all(True) if 'background-image' in t.get('style', '').lower()])
+        big_images += min(bg_image_count + bg_inline, 3)
+        
         if data_uris > 2:
             score -= 8
             details.append(f"❌ {data_uris} Base64-Bilder")
@@ -198,9 +203,12 @@ def analyze_visual_age(soup, html, url):
             details.append("⚠️ Kein modernes Layout")
     
     fixed_px = len(re.findall(r'width:\s*\d{3,4}px', full_css_lower))
-    if fixed_px > 5:
+    uses_framework = any(x in html for x in ['tailwind', 'cdn.tailwindcss', 'bootstrap', 'bulma', 'foundation'])
+    if fixed_px > 5 and not uses_framework:
         score -= 15
         details.append(f"❌ Fixe Breiten ({fixed_px})")
+    elif fixed_px > 5 and uses_framework:
+        details.append(f"ℹ️ Fixe Breiten ({fixed_px}) – Framework-generiert")
     
     if 'max-width' in full_css_lower:
         score += 3
@@ -217,12 +225,11 @@ def analyze_visual_age(soup, html, url):
     
     # Design
     gradients = len(re.findall(r'linear-gradient|radial-gradient', full_css_lower))
-    if gradients > 5:
-        score -= 10
-        details.append(f"❌ Gradienten ({gradients})")
-    elif gradients > 2:
-        score -= 3
-        details.append(f"⚠️ Gradienten ({gradients})")
+    if gradients > 15:
+        score -= 5
+        details.append(f"⚠️ Viele Gradienten ({gradients})")
+    elif gradients > 0:
+        details.append(f"ℹ️ Gradienten ({gradients})")
     
     shadows = full_css_lower.count('box-shadow')
     if shadows > 10:
