@@ -80,6 +80,7 @@ def analyze_visual_age(soup, html, url):
     # auch wenn die Seite optisch alt aussieht. Spuren im HTML/CSS:
     baukasten_signatures = {
         'Jimdo': ['jimdo', 'jimdofree', 'jdo.io', 'jimdostatic', 'cmsbox'],
+        'STRATO': ['strato-editor', 'cm4all', 'beng-editor', 'beng-proxy'],
         'Wix': ['wix.com', 'wixstatic', 'wixsite', '_wix', 'parastorage'],
         'Squarespace': ['squarespace', 'sqsp.net', 'sqspcdn'],
         'Webnode': ['webnode', 'wnode'],
@@ -267,9 +268,18 @@ def analyze_visual_age(soup, html, url):
         score += 2
         details.append("✅ Bootstrap 4/5")
     
-    if 'jquery-1.' in html or 'jquery/1.' in html:
+    if 'jquery-1.' in html or 'jquery/1.' in html or 'jquery-1/' in html:
         score -= 8
         details.append("❌ jQuery 1.x")
+        jquery_old = True
+    else:
+        jquery_old = False
+    
+    # Prototype.js = veraltetes JS-Framework (~2010), heute praktisch ausgestorben
+    if 'prototype.js' in html_lower or 'prototype-1.' in html_lower:
+        score -= 8
+        details.append("❌ Prototype.js = veraltet")
+        jquery_old = True  # gleicher Deckel-Effekt
     
     # Animationen
     has_anim = 'transition' in full_css_lower or 'animation' in full_css_lower or '@keyframes' in full_css_lower
@@ -326,6 +336,21 @@ def analyze_visual_age(soup, html, url):
     if soup.find('frameset') or soup.find('frame') or soup.find('iframe', src=re.compile(r'\.html')):
         score -= 15
         details.append("❌ Frames = 90er/2000er")
+    
+    # ===== HARTE ALT-SIGNALE DECKELN DEN SCORE =====
+    # Bestimmte Technologien sind so eindeutig veraltet, dass die Seite
+    # nicht "modern" sein kann – egal wie viele moderne Schnipsel im Code sind.
+    fixed_px_high = len(re.findall(r'width:\s*\d{3,4}px', full_css_lower)) > 30
+    if jquery_old:
+        # jQuery 1.x = spätestens 2016, meist älter. Niemals MODERN.
+        if score > 55:
+            score = 55
+            details.append("ℹ️ Score gedeckelt – jQuery 1.x kann nicht modern sein")
+    if fixed_px_high and inline_styles > 40:
+        # Viele fixe Breiten + viele Inline-Styles = altes/exportiertes Layout
+        if score > 60:
+            score = 60
+            details.append("ℹ️ Score gedeckelt – fixes Layout mit Inline-Styles")
     
     # Score begrenzen
     score = max(0, min(100, score))
