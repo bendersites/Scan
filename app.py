@@ -155,7 +155,7 @@ def analyze_visual_age(soup, html, url):
     # HTML Struktur
     semantic = ['header', 'nav', 'main', 'section', 'article', 'footer', 'aside']
     sem_count = sum(1 for tag in semantic if soup.find(tag))
-    if sem_count >= 4:
+    if sem_count >= 3:
         score += 10
         details.append(f"✅ Semantisch ({sem_count})")
     elif sem_count >= 2:
@@ -166,9 +166,11 @@ def analyze_visual_age(soup, html, url):
         details.append("❌ Kein semantisches HTML")
     
     divs = len(soup.find_all('div'))
-    if divs > 100:
+    if divs > 100 and not uses_framework:
         score -= 5
         details.append(f"⚠️ Div-Suppe ({divs})")
+    elif divs > 100 and uses_framework:
+        details.append(f"ℹ️ Div-Suppe ({divs}) – Framework-generiert")
     
     tables = len(soup.find_all('table'))
     if tables > 2:
