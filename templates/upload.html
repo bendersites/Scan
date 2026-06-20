@@ -100,7 +100,10 @@ async function checkSingle() {
     btn.textContent = 'Checken';
 }
 
-scanBtn.addEventListener('click', async () => { if(!selectedFile)return; scanBtn.disabled=true; progress.style.display='block'; const fd=new FormData(); fd.append('file',selectedFile); await fetch('/upload',{method:'POST',body:fd}); const iv=setInterval(async()=>{const d=await(await fetch('/status')).json(); progressFill.style.width=d.percent+'%'; currentUrl.textContent=d.url||'Scanne...'; progressText.textContent=`${d.current} / ${d.total}`; if(!d.running&&d.current>0){clearInterval(iv); progress.style.display='none'; result.style.display='block'; summaryText.textContent=`${d.total} Websites analysiert. Filter im Report auf 🔴 ALT für deine heißen Leads.`; scanBtn.textContent='✅ Fertig';}},1000); });
+scanBtn.addEventListener('click', async () => { if(!selectedFile)return; scanBtn.disabled=true; progress.style.display='block'; const fd=new FormData(); fd.append('file',selectedFile); await fetch('/upload',{method:'POST',body:fd}); const iv=setInterval(async()=>{const d=await(await fetch('/status')).json(); progressFill.style.width=d.percent+'%'; currentUrl.textContent=d.url||'Scanne...'; progressText.textContent=`${d.current} / ${d.total}`; if(!d.running&&d.current>0){clearInterval(iv); progress.style.display='none'; result.style.display='block'; summaryText.textContent=`${d.total} Websites analysiert. Filter im Report auf 🔴 ALT für deine heißen Leads.`; scanBtn.textContent='✅ Fertig';
+// Auto-Download CSV
+const a=document.createElement('a'); a.href='/download-csv'; a.download='bender-sites-scan.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}},1000); });
 </script>
 </body>
 </html>
